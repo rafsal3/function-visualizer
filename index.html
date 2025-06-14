@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Function Visualizer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* --- 1. Global Styles & Theme --- */
+        :root{--bg-color:#2d3436;--canvas-bg:#222831;--panel-bg:#393e46;--node-bg:#4f555e;--text-color:#eee;--text-muted:#9a9a9a;--border-color:#4a4a4a;--menubar-height:40px;--color-number:#26de81;--color-string:#fd9644;--color-boolean:#fc5c65;--color-vector:#45aaf2;--color-object:#a55eea;--font-main:'Nunito',sans-serif}
+        body{font-family:var(--font-main);margin:0;background-color:var(--bg-color);color:var(--text-color);overflow:hidden;height:100vh;width:100vw}
+        
+        /* --- 2. Menubar & Layout --- */
+        #menubar{position:absolute;top:0;left:0;width:100%;height:var(--menubar-height);background-color:var(--panel-bg);border-bottom:1px solid var(--border-color);display:flex;align-items:center;padding:0 10px;z-index:100}
+        .menu-dropdown{position:relative}.menu-btn{background:0 0;border:none;color:var(--text-color);padding:8px 12px;border-radius:4px;cursor:pointer;font-family:var(--font-main);font-size:.9em}.menu-btn:hover{background-color:#555c66}.dropdown-content{display:none;position:absolute;top:100%;left:0;background-color:var(--panel-bg);border:1px solid var(--border-color);border-radius:4px;box-shadow:0 8px 16px rgba(0,0,0,.3);min-width:160px;z-index:1}.dropdown-content a{color:var(--text-color);padding:10px 15px;text-decoration:none;display:block;font-size:.9em;cursor:pointer}.dropdown-content a:hover{background-color:#555c66}.menu-dropdown:hover .dropdown-content{display:block}
+        #app-container{display:flex;height:100vh;padding-top:var(--menubar-height);box-sizing:border-box}
+        #canvas-container{flex-grow:1;position:relative;overflow:hidden;cursor:grab;background-color:var(--canvas-bg);background-image:radial-gradient(var(--panel-bg) 1px,transparent 1px);background-size:25px 25px}
+        
+        /* --- 3. Stacking & Containers --- */
+        #groups-container, #nodes-container, #connections-svg {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            transform-origin: 0 0; /* Critical for correct zooming */
+        }
+        #groups-container { z-index: 10; pointer-events: none; }
+        #connections-svg { z-index: 20; pointer-events: none; }
+        #nodes-container { z-index: 30; pointer-events: none; }
+
+        /* Allow clicks on the actual elements */
+        .node, .group, #connections-svg g { pointer-events: all; }
+
+        /* --- 4. Connections --- */
+        #connections-svg g{cursor:pointer}
+        .connection-path{stroke-width:4px;fill:none;stroke-linecap:round;transition:stroke-width .2s,stroke .2s;filter:drop-shadow(0 0 2px rgba(0,0,0,.5))}
+        .connection-hitbox{stroke:transparent;stroke-width:20px;fill:none;stroke-linecap:round}
+        .connection-path.selected{stroke:#ffeb3b!important;stroke-width:6px;filter:drop-shadow(0 0 8px #ffeb3b)}
+        .connection-path[data-type=Number]{stroke:var(--color-number)}.connection-path[data-type=String]{stroke:var(--color-string)}.connection-path[data-type=Boolean]{stroke:var(--color-boolean)}.connection-path[data-type=Vector]{stroke:var(--color-vector)}.connection-path[data-type=Object]{stroke:var(--color-object)}
+        
+        /* --- 5. Node Groups --- */
+        .group{position:absolute;background-color:rgba(99,110,114,.2);border:2px solid rgba(255,255,255,.2);border-radius:16px;box-shadow:0 5px 25px rgba(0,0,0,.3);transition:border-color .2s}
+        .group.selected{border-color:var(--color-vector)}
+        .group-header{padding:8px 15px;color:rgba(255,255,255,.8);font-weight:700;cursor:move;border-top-left-radius:12px;border-top-right-radius:12px;background-color:rgba(255,255,255,.05)}
+        .group-resize-handle{position:absolute;bottom:0;right:0;width:20px;height:20px;cursor:nwse-resize}
+
+        /* --- 6. Inspector Panel --- */
+        .panel{width:320px;background-color:var(--panel-bg);padding:20px;box-sizing:border-box;display:flex;flex-direction:column;gap:20px;border-left:1px solid var(--border-color);overflow-y:auto}
+        .panel .controls-cluster{display:flex;gap:10px}.panel .controls-cluster button{flex-grow:1}
+        .panel h3{margin:0 0 10px;border-bottom:1px solid var(--border-color);padding-bottom:10px;display:flex;justify-content:space-between;align-items:center}.panel label{font-size:.9em;color:var(--text-muted);font-weight:700;display:block;margin-bottom:5px}
+        .panel input,.panel select,.panel textarea{width:100%;padding:10px;box-sizing:border-box;background-color:#222831;border:1px solid var(--border-color);color:var(--text-color);border-radius:6px;margin-bottom:15px;font-family:var(--font-main)}
+        input[type=color]{padding:2px;height:40px}.panel button.primary-btn{width:100%;padding:12px;background-image:linear-gradient(45deg,#45aaf2,#26de81);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:1em;transition:transform .2s ease,box-shadow .2s ease}
+        .panel button.secondary-btn{background-image:linear-gradient(45deg,#a55eea,#fd9644)}.panel button:hover{transform:translateY(-2px);box-shadow:0 4px 15px rgba(69,170,242,.4)}
+        #inspector .hidden{display:none}.port-editor{background:#2a2f36;padding:10px;border-radius:6px;margin-bottom:10px;border-left:4px solid var(--border-color)}.port-editor-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.port-editor input{margin-bottom:5px}.add-port-btn,.port-editor-remove-btn{background:0 0;border:none;color:var(--text-muted);cursor:pointer;font-size:1.5em;font-weight:700;transition:color .2s}.port-editor-remove-btn:hover{color:var(--color-boolean)}.add-port-btn:hover{color:var(--color-number)}
+        
+        /* --- 7. Nodes --- */
+        @keyframes node-spawn{from{transform:scale(.8) translateY(20px);opacity:0}to{transform:scale(1) translateY(0);opacity:1}}.node{position:absolute;background-color:var(--node-bg);border-radius:12px;box-shadow:0 5px 20px rgba(0,0,0,.5);border:3px solid transparent;min-width:220px;transition:border-color .2s,box-shadow .2s;user-select:none;animation:node-spawn .3s cubic-bezier(.175,.885,.32,1.275)}.node.selected{border-color:var(--color-vector);box-shadow:0 0 25px rgba(69,170,242,.5)}.node-header{padding:10px 15px;font-weight:700;font-size:1.1em;border-top-left-radius:8px;border-top-right-radius:8px;cursor:move;color:#fff}.node-content{padding:15px 0;display:flex;justify-content:space-between}.node-ports{display:flex;flex-direction:column;gap:15px}.port{display:flex;align-items:center;padding:0 15px}.port-connector{width:14px;height:14px;border:3px solid var(--node-bg);border-radius:50%;cursor:crosshair;transition:transform .2s,background-color .2s;box-shadow:0 0 5px rgba(0,0,0,.5)}.port-connector:hover{transform:scale(1.4)}.port-label{font-size:1em}.inputs .port-label{margin-left:10px}.outputs .port-label{margin-right:10px}.port[data-type=Number] .port-connector{background-color:var(--color-number)}.port[data-type=String] .port-connector{background-color:var(--color-string)}.port[data-type=Boolean] .port-connector{background-color:var(--color-boolean)}.port[data-type=Vector] .port-connector{background-color:var(--color-vector)}.port[data-type=Object] .port-connector{background-color:var(--color-object)}
+    </style>
+</head>
+<body>
+
+    <div id="menubar">
+        <div class="menu-dropdown">
+            <button class="menu-btn">File</button>
+            <div class="dropdown-content">
+                <a id="new-project-btn">New Project</a>
+                <a id="save-btn">Save Project As...</a>
+                <a id="import-btn">Import Project</a>
+            </div>
+        </div>
+    </div>
+    <input type="file" id="import-file-input" accept=".json" style="display: none;">
+
+    <div id="app-container">
+        <div id="canvas-container">
+            <!-- HTML Structure Change: The containers are now siblings to allow z-index layering.
+                 Order is: Groups -> Connections -> Nodes -->
+            <div id="groups-container"></div>
+            <svg id="connections-svg"></svg>
+            <div id="nodes-container"></div>
+        </div>
+        <div class="panel">
+            <div id="controls">
+                <h3>Create</h3>
+                <div class="controls-cluster">
+                    <button id="add-node-btn" class="primary-btn">New Function</button>
+                    <button id="add-group-btn" class="primary-btn secondary-btn">New Group</button>
+                </div>
+            </div>
+            <div id="inspector">
+                <div id="inspector-content" class="hidden"></div>
+                <div id="inspector-placeholder">
+                    <h3>Inspector</h3>
+                    <p>Select an item to edit its properties.</p>
+                    <p style="color: var(--text-muted); font-size: 0.9em;">(Press `Ctrl+S` to save. Use 'Delete' to remove a selected item)</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- 1. DOM & State ---
+        const canvasContainer = document.getElementById('canvas-container');
+        const groupsContainer = document.getElementById('groups-container');
+        const nodesContainer = document.getElementById('nodes-container');
+        const connectionsSvg = document.getElementById('connections-svg');
+        const saveBtn = document.getElementById('save-btn');
+        const importBtn = document.getElementById('import-btn');
+        const importFileInput = document.getElementById('import-file-input');
+        const newProjectBtn = document.getElementById('new-project-btn');
+        const addNodeBtn = document.getElementById('add-node-btn');
+        const addGroupBtn = document.getElementById('add-group-btn');
+        const inspectorContent = document.getElementById('inspector-content');
+        const inspectorPlaceholder = document.getElementById('inspector-placeholder');
+        
+        let nodes = {}, groups = {}, connections = [];
+        let nodeIdCounter = 0, groupIdCounter = 0;
+        let selected = { type: null, id: null };
+        
+        let canvasState = { panX: 0, panY: 0, zoom: 1 };
+        let dragState = { type: null, id: null, startX: 0, startY: 0, nodeOffsets: [] };
+        let connectionDragState = { isDragging: false, fromNode: null, fromPort: null, type: null, path: null };
+
+        const DATA_TYPES = ["Number", "String", "Boolean", "Vector", "Object"];
+        
+        // --- 1.5 Auto-Save & Debounce ---
+        function debounce(func, timeout = 500) {
+            let timer;
+            return (...args) => {
+                clearTimeout(timer);
+                timer = setTimeout(() => { func.apply(this, args); }, timeout);
+            };
+        }
+
+        function autoSaveToLocalStorage() {
+            const projectData = {
+                nodes: nodes,
+                groups: groups,
+                connections: connections,
+                nodeIdCounter: nodeIdCounter,
+                groupIdCounter: groupIdCounter,
+            };
+            localStorage.setItem('interactiveFunctionVisualizerProject', JSON.stringify(projectData));
+        }
+
+        const debouncedAutoSave = debounce(autoSaveToLocalStorage);
+
+        // --- 2. Save/Import/Load Logic ---
+        function handleSave() {
+            const projectData = {
+                nodes: nodes,
+                groups: groups,
+                connections: connections,
+                nodeIdCounter: nodeIdCounter,
+                groupIdCounter: groupIdCounter,
+            };
+            const jsonString = JSON.stringify(projectData, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'my-functions.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function handleImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (!data.nodes || !data.connections || !data.groups) {
+                        throw new Error("Invalid project file format.");
+                    }
+                    loadProject(data);
+                    debouncedAutoSave();
+                } catch (err) {
+                    alert("Error: Could not import project file. \n" + err.message);
+                } finally {
+                    importFileInput.value = ""; // Reset for next import
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function loadProject(data) {
+            clearAll();
+            nodes = data.nodes;
+            groups = data.groups || {};
+            connections = data.connections;
+            nodeIdCounter = data.nodeIdCounter || 0;
+            groupIdCounter = data.groupIdCounter || 0;
+            
+            for (const id in groups) rebuildGroupElement(groups[id]);
+            for (const id in nodes) rebuildNodeElement(nodes[id]);
+            
+            drawAllConnections();
+        }
+
+        function clearAll() {
+            groupsContainer.innerHTML = '';
+            nodesContainer.innerHTML = '';
+            connectionsSvg.innerHTML = '';
+            nodes = {};
+            groups = {};
+            connections = [];
+            clearSelection();
+        }
+
+        // --- 3. Core Creation & Rendering ---
+        function createNode(x, y) {
+            const id = `node-${nodeIdCounter++}`;
+            nodes[id] = {
+                id: id, x: x, y: y, name: "New Function", description: "A cool new function.",
+                color: "#45aaf2", groupId: null,
+                inputs: [{ name: "Input", type: "Number", example: "123" }],
+                outputs: [{ name: "Output", type: "Number", example: "123" }]
+            };
+            const nodeEl = document.createElement("div");
+            nodeEl.id = id;
+            nodeEl.className = "node";
+            nodesContainer.appendChild(nodeEl);
+            renderNode(id);
+            select({ type: "node", id: id });
+            debouncedAutoSave();
+        }
+
+        function createGroup(x, y) {
+            const id = `group-${groupIdCounter++}`;
+            groups[id] = { id: id, x: x, y: y, width: 400, height: 300, name: "My Group", color: "rgba(99, 110, 114, 0.2)" };
+            const groupEl = document.createElement("div");
+            groupEl.id = id;
+            groupEl.className = "group";
+            groupsContainer.appendChild(groupEl);
+            renderGroup(id);
+            select({ type: "group", id: id });
+            debouncedAutoSave();
+        }
+
+        function renderNode(id) {
+            const node = nodes[id];
+            const el = document.getElementById(id);
+            if (!node || !el) return;
+            
+            el.style.left = `${node.x}px`;
+            el.style.top = `${node.y}px`;
+
+            let inputsHTML = node.inputs.map((port, index) => 
+                `<div class="port" data-node-id="${id}" data-port-index="${index}" data-port-type="input" data-type="${port.type}">
+                    <div class="port-connector"></div><span class="port-label">${port.name}</span>
+                 </div>`).join('');
+            
+            let outputsHTML = node.outputs.map((port, index) => 
+                `<div class="port" data-node-id="${id}" data-port-index="${index}" data-port-type="output" data-type="${port.type}">
+                    <span class="port-label">${port.name}</span><div class="port-connector"></div>
+                 </div>`).join('');
+
+            el.innerHTML = `
+                <div class="node-header" style="background:${node.color}">${node.name}</div>
+                <div class="node-content">
+                    <div class="node-ports inputs">${inputsHTML}</div>
+                    <div class="node-ports outputs">${outputsHTML}</div>
+                </div>`;
+        }
+        
+        function renderGroup(id) {
+            const group = groups[id];
+            const el = document.getElementById(id);
+            if (!group || !el) return;
+            el.style.left = `${group.x}px`;
+            el.style.top = `${group.y}px`;
+            el.style.width = `${group.width}px`;
+            el.style.height = `${group.height}px`;
+            el.style.backgroundColor = group.color;
+            el.innerHTML = `<div class="group-header">${group.name}</div><div class="group-resize-handle"></div>`;
+        }
+        
+        function rebuildNodeElement(nodeData) {
+            const el = document.createElement("div");
+            el.id = nodeData.id;
+            el.className = "node";
+            el.style.animation = "none";
+            nodesContainer.appendChild(el);
+            renderNode(nodeData.id);
+        }
+
+        function rebuildGroupElement(groupData) {
+            const el = document.createElement("div");
+            el.id = groupData.id;
+            el.className = "group";
+            el.style.animation = "none";
+            groupsContainer.appendChild(el);
+            renderGroup(groupData.id);
+        }
+
+        function drawAllConnections() {
+            connectionsSvg.innerHTML = "";
+            connections.forEach((conn, index) => {
+                const path = createConnectionPath(conn.fromNode, conn.fromPort, conn.toNode, conn.toPort);
+                if (!path) return;
+
+                const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                const hitbox = path.cloneNode();
+                hitbox.classList.add("connection-hitbox");
+
+                const fromNode = nodes[conn.fromNode];
+                if (fromNode && fromNode.outputs[conn.fromPort]) {
+                    path.dataset.type = fromNode.outputs[conn.fromPort].type;
+                }
+
+                if (selected.type === "connection" && selected.id === index) {
+                    path.classList.add("selected");
+                }
+                
+                g.appendChild(hitbox);
+                g.appendChild(path);
+                g.addEventListener("mousedown", (e) => {
+                    e.stopPropagation();
+                    select({ type: "connection", id: index });
+                });
+                connectionsSvg.appendChild(g);
+            });
+        }
+        
+        function createConnectionPath(fromNodeId, fromPortIndex, toNodeId, toPortIndex) {
+            const fromConnector = document.querySelector(`.port[data-node-id="${fromNodeId}"][data-port-type="output"][data-port-index="${fromPortIndex}"] .port-connector`);
+            const toConnector = document.querySelector(`.port[data-node-id="${toNodeId}"][data-port-type="input"][data-port-index="${toPortIndex}"] .port-connector`);
+            
+            if (!fromConnector || !toConnector) return null;
+
+            const svgRect = connectionsSvg.getBoundingClientRect();
+            const fromRect = fromConnector.getBoundingClientRect();
+            const toRect = toConnector.getBoundingClientRect();
+
+            const startX = (fromRect.left + fromRect.width / 2) - svgRect.left;
+            const startY = (fromRect.top + fromRect.height / 2) - svgRect.top;
+            const endX = (toRect.left + toRect.width / 2) - svgRect.left;
+            const endY = (toRect.top + toRect.height / 2) - svgRect.top;
+
+            return createBezierPath(startX, startY, endX, endY);
+        }
+        
+        function createBezierPath(x1, y1, x2, y2) {
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            const controlPointX = x1 + Math.abs(x2 - x1) * 0.65;
+            path.setAttribute("d", `M ${x1} ${y1} C ${controlPointX} ${y1}, ${x2 - Math.abs(x2-x1)*0.65} ${y2}, ${x2} ${y2}`);
+            path.classList.add("connection-path");
+            return path;
+        }
+        
+        // --- 4. Selection & Inspector ---
+        function clearSelection() {
+            if (selected.type) {
+                if (selected.type === "node" || selected.type === "group") {
+                    document.getElementById(selected.id)?.classList.remove("selected");
+                }
+                selected = { type: null, id: null };
+            }
+            inspectorContent.classList.add("hidden");
+            inspectorPlaceholder.classList.remove("hidden");
+            drawAllConnections(); // Redraw to remove 'selected' class from connections
+        }
+        
+        function select(item) {
+            clearSelection();
+            selected = item;
+            if (selected.type === "node" || selected.type === "group") {
+                document.getElementById(selected.id)?.classList.add("selected");
+            }
+            inspectorContent.classList.remove("hidden");
+            inspectorPlaceholder.classList.add("hidden");
+            populateInspector();
+            drawAllConnections(); // Redraw to add 'selected' class
+        }
+        
+        function populateInspector() {
+            let contentHTML = "";
+            let item = null;
+
+            if (selected.type === 'node') {
+                item = nodes[selected.id];
+                contentHTML = `<h3>Node Properties</h3>
+                    <div><label for="node-name-input">Function Name</label><input type="text" id="node-name-input" value="${item.name}"></div>
+                    <div><label for="node-color-input">Header Color</label><input type="color" id="node-color-input" value="${item.color}"></div>
+                    <div><label for="node-desc-input">Description</label><textarea id="node-desc-input" rows="3">${item.description}</textarea></div>
+                    <div id="inspector-inputs"></div>
+                    <div id="inspector-outputs"></div>`;
+            } else if (selected.type === 'group') {
+                item = groups[selected.id];
+                contentHTML = `<h3>Group Properties</h3>
+                    <div><label for="group-name-input">Group Title</label><input type="text" id="group-name-input" value="${item.name}"></div>
+                    <div><label for="group-color-input">Group Color</label><input type="color" id="group-color-input" value="${item.color}"></div>`;
+            } else if (selected.type === 'connection') {
+                contentHTML = "<h3>Connection Selected</h3><p>Press 'Delete' to remove.</p>";
+            }
+
+            inspectorContent.innerHTML = contentHTML;
+
+            if (selected.type === 'node') {
+                document.getElementById("inspector-inputs").innerHTML = '<h4>Inputs <button class="add-port-btn" data-type="input">+</button></h4>';
+                item.inputs.forEach((port, index) => document.getElementById("inspector-inputs").appendChild(createPortEditor(port, index, "input")));
+                
+                document.getElementById("inspector-outputs").innerHTML = '<h4>Outputs <button class="add-port-btn" data-type="output">+</button></h4>';
+                item.outputs.forEach((port, index) => document.getElementById("inspector-outputs").appendChild(createPortEditor(port, index, "output")));
+            }
+        }
+        
+        function createPortEditor(port, index, portType) {
+            const editor = document.createElement("div");
+            editor.className = "port-editor";
+            const options = DATA_TYPES.map(type => `<option value="${type}" ${type === port.type ? "selected" : ""}>${type}</option>`).join('');
+            editor.innerHTML = `
+                <div class="port-editor-header">
+                    <input type="text" class="port-name-input" value="${port.name}" data-index="${index}" data-port-type="${portType}">
+                    <button class="port-editor-remove-btn" data-index="${index}" data-port-type="${portType}">×</button>
+                </div>
+                <select class="port-type-select" data-index="${index}" data-port-type="${portType}">${options}</select>
+                <input type="text" class="port-example-input" placeholder="Example value..." value="${port.example || ''}" data-index="${index}" data-port-type="${portType}">`;
+            editor.style.borderLeftColor = `var(--color-${port.type})`;
+            return editor;
+        }
+
+        // --- 5. Event Handlers ---
+        addNodeBtn.addEventListener("click", () => createNode((-canvasState.panX + 100) / canvasState.zoom, (-canvasState.panY + 100) / canvasState.zoom));
+        addGroupBtn.addEventListener("click", () => createGroup((-canvasState.panX + 50) / canvasState.zoom, (-canvasState.panY + 50) / canvasState.zoom));
+        saveBtn.addEventListener('click', handleSave);
+        importBtn.addEventListener('click', () => importFileInput.click());
+        importFileInput.addEventListener('change', handleImport);
+        newProjectBtn.addEventListener('click', () => {
+            if (confirm("Are you sure? This will clear your current workspace from the browser's memory.")) {
+                localStorage.removeItem('interactiveFunctionVisualizerProject');
+                clearAll();
+                nodeIdCounter = 0;
+                groupIdCounter = 0;
+                init();
+            }
+        });
+
+
+        inspectorContent.addEventListener("input", e => {
+            if (!selected.id) return;
+            const target = e.target;
+            if (selected.type === 'node') {
+                const node = nodes[selected.id];
+                if (target.id === 'node-color-input') {
+                    node.color = target.value;
+                    renderNode(selected.id);
+                } else if (target.classList.contains('port-name-input')) {
+                     const { index, portType } = target.dataset;
+                    node[portType + 's'][index].name = target.value;
+                    renderNode(selected.id);
+                } else if (target.classList.contains('port-example-input')) {
+                     const { index, portType } = target.dataset;
+                    node[portType + 's'][index].example = target.value;
+                } else if (target.id === 'node-name-input') {
+                    node.name = target.value;
+                    renderNode(selected.id);
+                } else if (target.id === 'node-desc-input') {
+                    node.description = target.value;
+                }
+            } else if (selected.type === 'group' && target.id === 'group-color-input') {
+                groups[selected.id].color = target.value;
+                renderGroup(selected.id);
+            }
+            debouncedAutoSave();
+        });
+
+        inspectorContent.addEventListener("change", e => {
+            if (!selected.id) return;
+            const target = e.target;
+            if (selected.type === 'node') {
+                const node = nodes[selected.id];
+                 if (target.classList.contains('port-type-select')) {
+                    const { index, portType } = target.dataset;
+                    node[portType + 's'][index].type = target.value;
+                    renderNode(selected.id);
+                    populateInspector(); // To update colors and values
+                    drawAllConnections();
+                }
+            } else if (selected.type === 'group' && target.id === 'group-name-input') {
+                groups[selected.id].name = target.value;
+                renderGroup(selected.id);
+            }
+            debouncedAutoSave();
+        });
+
+        inspectorContent.addEventListener("click", e => {
+            if (selected.type !== 'node') return;
+            const node = nodes[selected.id];
+            const target = e.target;
+
+            if (target.classList.contains("add-port-btn")) {
+                const { type } = target.dataset;
+                node[type + 's'].push({ name: "New Port", type: "Number", example: "" });
+                renderNode(selected.id);
+                populateInspector();
+                debouncedAutoSave();
+            } else if (target.classList.contains("port-editor-remove-btn")) {
+                const { index, portType } = target.dataset;
+                const portIndex = parseInt(index, 10);
+                
+                connections = connections.filter(conn => {
+                    if (portType === 'input') return !(conn.toNode === selected.id && conn.toPort === portIndex);
+                    if (portType === 'output') return !(conn.fromNode === selected.id && conn.fromPort === portIndex);
+                    return true;
+                });
+                connections.forEach(conn => {
+                    if (portType === 'input' && conn.toNode === selected.id && conn.toPort > portIndex) conn.toPort--;
+                    else if (portType === 'output' && conn.fromNode === selected.id && conn.fromPort > portIndex) conn.fromPort--;
+                });
+                
+                node[portType + 's'].splice(portIndex, 1);
+                renderNode(selected.id);
+                populateInspector();
+                drawAllConnections();
+                debouncedAutoSave();
+            }
+        });
+        
+        canvasContainer.addEventListener('mousedown', e => {
+            const target = e.target;
+            if (e.button === 1 || (e.button === 0 && (e.altKey || e.ctrlKey))) { // Middle mouse or Alt+Click for panning
+                dragState = { type: 'pan', startX: e.clientX - canvasState.panX, startY: e.clientY - canvasState.panY };
+                canvasContainer.style.cursor = "grabbing";
+            } else if (target.classList.contains('node-header')) {
+                const id = target.closest('.node').id;
+                dragState = { type: 'node', id: id, startX: e.clientX / canvasState.zoom - nodes[id].x, startY: e.clientY / canvasState.zoom - nodes[id].y };
+                select({ type: 'node', id: id });
+            } else if (target.classList.contains('group-header')) {
+                const id = target.closest('.group').id;
+                const group = groups[id];
+                dragState = {
+                    type: 'group', id: id, startX: e.clientX / canvasState.zoom - group.x, startY: e.clientY / canvasState.zoom - group.y,
+                    nodeOffsets: Object.values(nodes).filter(n => n.groupId === id).map(n => ({ id: n.id, dx: n.x - group.x, dy: n.y - group.y }))
+                };
+                select({ type: 'group', id: id });
+            } else if (target.classList.contains('group-resize-handle')) {
+                const groupEl = target.closest('.group');
+                dragState = { type: 'group-resize', id: groupEl.id, startX: groupEl.offsetLeft, startY: groupEl.offsetTop };
+            } else if (target.classList.contains('port-connector')) {
+                const portEl = target.parentElement;
+                const { nodeId, portIndex, portType, type } = portEl.dataset;
+                if (portType === 'input') {
+                    const connIndex = connections.findIndex(c => c.toNode === nodeId && c.toPort == portIndex);
+                    if (connIndex > -1) {
+                        const conn = connections.splice(connIndex, 1)[0];
+                        startConnectionDrag(conn.fromNode, conn.fromPort, nodes[conn.fromNode].outputs[conn.fromPort].type, e);
+                        drawAllConnections();
+                    }
+                } else {
+                    startConnectionDrag(nodeId, portIndex, type, e);
+                }
+            } else if (!target.closest('.node') && !target.closest('g') && !target.closest('.group')) {
+                clearSelection();
+                dragState = { type: 'pan', startX: e.clientX - canvasState.panX, startY: e.clientY - canvasState.panY };
+                canvasContainer.style.cursor = "grabbing";
+            }
+        });
+
+        function startConnectionDrag(fromNode, fromPort, type, event) {
+            connectionDragState = { isDragging: true, fromNode, fromPort, type, path: createBezierPath(0, 0, 0, 0) };
+            connectionDragState.path.dataset.type = type;
+            connectionsSvg.appendChild(connectionDragState.path);
+            updateDraggedConnection(event); // Draw first segment
+        }
+        
+        function updateDraggedConnection(e) {
+             const svgRect = connectionsSvg.getBoundingClientRect();
+             const fromPortEl = document.querySelector(`.port[data-node-id="${connectionDragState.fromNode}"][data-port-type="output"][data-port-index="${connectionDragState.fromPort}"] .port-connector`)?.getBoundingClientRect();
+             if (!fromPortEl) return;
+             const startX = fromPortEl.left + fromPortEl.width / 2 - svgRect.left;
+             const startY = fromPortEl.top + fromPortEl.height / 2 - svgRect.top;
+             const endX = e.clientX - svgRect.left;
+             const endY = e.clientY - svgRect.top;
+             connectionDragState.path.setAttribute("d", createBezierPath(startX, startY, endX, endY).getAttribute('d'));
+        }
+
+        window.addEventListener('mousemove', e => {
+            if (connectionDragState.isDragging) {
+                updateDraggedConnection(e);
+                return;
+            }
+            if (!dragState.type) return;
+            
+            e.preventDefault();
+
+            if (dragState.type === 'pan') {
+                canvasState.panX = e.clientX - dragState.startX;
+                canvasState.panY = e.clientY - dragState.startY;
+                updateCanvasTransform();
+            } else if (dragState.type === 'node') {
+                const node = nodes[dragState.id];
+                node.x = e.clientX / canvasState.zoom - dragState.startX;
+                node.y = e.clientY / canvasState.zoom - dragState.startY;
+                renderNode(dragState.id);
+                drawAllConnections();
+            } else if (dragState.type === 'group') {
+                const group = groups[dragState.id];
+                group.x = e.clientX / canvasState.zoom - dragState.startX;
+                group.y = e.clientY / canvasState.zoom - dragState.startY;
+                renderGroup(dragState.id);
+                dragState.nodeOffsets.forEach(offset => {
+                    const node = nodes[offset.id];
+                    node.x = group.x + offset.dx;
+                    node.y = group.y + offset.dy;
+                    renderNode(node.id);
+                });
+                drawAllConnections();
+            } else if (dragState.type === 'group-resize') {
+                const group = groups[dragState.id];
+                const canvasRect = canvasContainer.getBoundingClientRect();
+                const mouseX = (e.clientX - canvasRect.left - canvasState.panX) / canvasState.zoom;
+                const mouseY = (e.clientY - canvasRect.top - canvasState.panY) / canvasState.zoom;
+                group.width = Math.max(200, mouseX - group.x);
+                group.height = Math.max(150, mouseY - group.y);
+                renderGroup(dragState.id);
+            }
+        });
+        
+        window.addEventListener('mouseup', e => {
+            if (dragState.type === 'node') {
+                const node = nodes[dragState.id];
+                let inGroup = false;
+                for (const groupId in groups) {
+                    const group = groups[groupId];
+                    if (node.x > group.x && node.x < group.x + group.width && node.y > group.y && node.y < group.y + group.height) {
+                        node.groupId = groupId;
+                        inGroup = true;
+                        break;
+                    }
+                }
+                if (!inGroup) node.groupId = null;
+            } else if (connectionDragState.isDragging) {
+                const target = e.target;
+                if (target.classList.contains("port-connector")) {
+                    const portEl = target.parentElement;
+                    const { nodeId, portIndex, portType, type } = portEl.dataset;
+                    if (portType === 'input' && connectionDragState.type === type && connectionDragState.fromNode !== nodeId) {
+                        // Remove any existing connection to this input port
+                        connections = connections.filter(c => !(c.toNode === nodeId && c.toPort == portIndex));
+                        // Add new connection
+                        connections.push({ fromNode: connectionDragState.fromNode, fromPort: connectionDragState.fromPort, toNode: nodeId, toPort: portIndex });
+                    }
+                }
+                connectionDragState.path.remove();
+                drawAllConnections();
+            }
+
+            dragState = { type: null, id: null };
+            connectionDragState.isDragging = false;
+            canvasContainer.style.cursor = "grab";
+            debouncedAutoSave();
+        });
+        
+        window.addEventListener('keydown', e => {
+            // Feature: Save on Ctrl+S
+            if (e.ctrlKey && (e.key === 's' || e.key === 'S')) {
+                e.preventDefault();
+                handleSave();
+                return;
+            }
+
+            // Feature: Delete selected item
+            const isTyping = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+            if ((e.key === 'Delete') && selected.type && !isTyping) {
+                e.preventDefault(); //
+                
+                if (selected.type === 'node') {
+                    const nodeId = selected.id;
+                    connections = connections.filter(c => c.fromNode !== nodeId && c.toNode !== nodeId);
+                    delete nodes[nodeId];
+                    document.getElementById(nodeId)?.remove();
+                } else if (selected.type === 'group') {
+                    const groupId = selected.id;
+                    Object.values(nodes).forEach(n => {
+                        if (n.groupId === groupId) n.groupId = null;
+                    });
+                    delete groups[groupId];
+                    document.getElementById(groupId)?.remove();
+                } else if (selected.type === 'connection') {
+                    connections.splice(selected.id, 1);
+                }
+                
+                clearSelection();
+                debouncedAutoSave();
+            }
+        });
+
+        function updateCanvasTransform() {
+            const transform = `translate(${canvasState.panX}px, ${canvasState.panY}px) scale(${canvasState.zoom})`;
+            groupsContainer.style.transform = transform;
+            nodesContainer.style.transform = transform;
+            drawAllConnections();
+        }
+
+        canvasContainer.addEventListener("wheel", e => {
+            e.preventDefault();
+            const rate = 0.1;
+            const direction = e.deltaY < 0 ? 1 : -1;
+            const oldZoom = canvasState.zoom;
+            const newZoom = Math.max(0.2, Math.min(3, oldZoom + direction * rate));
+            
+            const rect = canvasContainer.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            canvasState.panX = mouseX - (mouseX - canvasState.panX) * (newZoom / oldZoom);
+            canvasState.panY = mouseY - (mouseY - canvasState.panY) * (newZoom / oldZoom);
+            canvasState.zoom = newZoom;
+            
+            updateCanvasTransform();
+        });
+        
+        // --- 6. Initializer ---
+        function init() {
+            // Auto-load from local storage
+            const savedProjectJSON = localStorage.getItem('interactiveFunctionVisualizerProject');
+            if (savedProjectJSON) {
+                try {
+                    const savedProjectData = JSON.parse(savedProjectJSON);
+                    loadProject(savedProjectData);
+                } catch (error) {
+                    console.error("Failed to load project from local storage. Starting fresh.", error);
+                    createNode(100, 150); // Fallback to default
+                }
+            } else {
+                createNode(100, 150); // Default for first-time users
+            }
+            
+            clearSelection();
+            updateCanvasTransform();
+        }
+        init();
+    });
+    </script>
+</body>
+</html>
